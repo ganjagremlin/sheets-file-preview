@@ -1,0 +1,24 @@
+# Push only the Apps Script source files.
+# Everything else stays local.
+
+# Ignore everything by default...
+**/**
+
+# ...then explicitly allow the files clasp should push.
+!Code.gs
+!FileService.gs
+!Preview.html
+!Sidebar.html
+!Dialog.html
+!Setup.html
+!appsscript.json
+
+# Never push these even if patterns above match.
+.git/**
+node_modules/**
+docs/**
+.claspignore
+.gitignore
+*.md
+DEPLOYING.md
+LICENSE

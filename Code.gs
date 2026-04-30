@@ -1,0 +1,265 @@
+/**
+ * Markdown File Preview for Google Sheets
+ * https://github.com/ganjagremlin/sheets-file-preview
+ *
+ * Opens a sidebar (or wider modeless dialog) showing rendered markdown
+ * for markdown notes synced to Google Drive, referenced by filename in
+ * a configurable column of your sheet.
+ */
+
+// ---- defaults (overridden at runtime by user settings) ----
+
+const CONFIG = {
+  vaultFolderName: 'obsidian',  // overridden by setup
+  fileNameColumn: 3,            // overridden by setup (Column C = 3)
+  headerRow: 1,
+  cacheTtlSeconds: 300,
+  sidebarTitle: 'Note Preview',
+  dialogWidth: 900,
+  dialogHeight: 700,
+  dialogMinWidth: 400,
+  dialogMaxWidth: 1600,
+  dialogMinHeight: 300,
+  dialogMaxHeight: 1200
+};
+
+// PropertiesService keys
+const PROP_VAULT_FOLDER   = 'vaultFolderName';
+const PROP_FILE_COL       = 'fileNameColumn';
+const PROP_SETUP_DONE     = 'setupComplete';
+const PROP_DIALOG_WIDTH   = 'dialogWidth';
+const PROP_DIALOG_HEIGHT  = 'dialogHeight';
+
+// ---- menu ----
+
+/**
+ * Simple trigger — runs automatically when the sheet opens.
+ * Shows a first-run setup prompt if setup hasn't been completed yet.
+ *
+ * Note: throws when run manually from the Apps Script editor (no UI context).
+ * The try/catch makes that a silent no-op. To trigger the auth flow during
+ * installation, run any other function from the editor instead.
+ */
+function onOpen() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const menu = ui.createMenu('📄 Notes')
+      .addItem('Preview Selected File',           'previewSelectedFile')
+      .addItem('Preview Selected File (Dialog)',  'previewSelectedFileAsDialog')
+      .addSeparator()
+      .addItem('Settings',    'showSettings')
+      .addItem('Clear Cache', 'clearAllCaches')
+      .addToUi();
+
+    // Show the setup dialog automatically on first run.
+    const props = PropertiesService.getUserProperties();
+    if (!props.getProperty(PROP_SETUP_DONE)) {
+      showSetup();
+    }
+  } catch (e) {
+    // No UI context — nothing to do.
+  }
+}
+
+// ---- preview entry points ----
+
+function previewSelectedFile() {
+  const fileName = getSelectedFileName_();
+  if (!fileName) return;
+  showSidebar(fileName);
+}
+
+function previewSelectedFileAsDialog() {
+  const fileName = getSelectedFileName_();
+  if (!fileName) return;
+  showDialog(fileName);
+}
+
+/** Called from the sidebar's "Pop out" button via google.script.run. */
+function showDialogForFile(fileName) {
+  showDialog(fileName.endsWith('.md') ? fileName : fileName + '.md');
+}
+
+// ---- setup & settings ----
+
+/**
+ * Opens the setup/settings dialog. On first run this is shown automatically;
+ * afterwards accessible via 📄 Notes → Settings.
+ */
+function showSetup() {
+  const template = HtmlService.createTemplateFromFile('Setup');
+  const settings = getSettings_();
+  template.vaultFolderName = settings.vaultFolderName;
+  template.fileNameColumn  = settings.fileNameColumn;
+  template.isFirstRun      = !PropertiesService.getUserProperties().getProperty(PROP_SETUP_DONE);
+
+  const html = template.evaluate()
+    .setWidth(460)
+    .setHeight(340)
+    .setSandboxMode(HtmlService.SandboxMode.IFRAME);
+
+  SpreadsheetApp.getUi().showModalDialog(html, '📄 Notes — Setup');
+}
+
+function showSettings() {
+  showSetup();
+}
+
+/**
+ * Called by Setup.html on form submit. Saves settings and marks setup done.
+ * Returns { ok, error } so the dialog can show validation feedback.
+ */
+function saveSettings(vaultFolderName, fileNameColumn) {
+  const folder = vaultFolderName && vaultFolderName.trim();
+  const col    = parseInt(fileNameColumn, 10);
+
+  if (!folder) return { ok: false, error: 'Vault folder name cannot be empty.' };
+  if (isNaN(col) || col < 1 || col > 26) return { ok: false, error: 'Column must be a number between 1 and 26.' };
+
+  // Verify the folder exists in Drive before saving.
+  const folders = DriveApp.getFoldersByName(folder);
+  if (!folders.hasNext()) {
+    return { ok: false, error: `No folder named "${folder}" found in your Google Drive. Check the name and try again.` };
+  }
+
+  const props = PropertiesService.getUserProperties();
+  props.setProperty(PROP_VAULT_FOLDER, folder);
+  props.setProperty(PROP_FILE_COL,     String(col));
+  props.setProperty(PROP_SETUP_DONE,   'true');
+
+  // Bust the cached vault folder ID since the folder may have changed.
+  props.deleteProperty('vaultFolderId');
+  FileService.invalidateAll();
+
+  return { ok: true };
+}
+
+/**
+ * Returns current saved settings (falling back to CONFIG defaults).
+ * This is the single source of truth for runtime settings — all code
+ * that needs vaultFolderName or fileNameColumn calls this, not CONFIG.
+ */
+function getSettings_() {
+  const props = PropertiesService.getUserProperties();
+  const savedFolder = props.getProperty(PROP_VAULT_FOLDER);
+  const savedCol    = parseInt(props.getProperty(PROP_FILE_COL), 10);
+  return {
+    vaultFolderName: savedFolder || CONFIG.vaultFolderName,
+    fileNameColumn:  isNaN(savedCol) ? CONFIG.fileNameColumn : savedCol
+  };
+}
+
+// ---- cache ----
+
+function clearAllCaches() {
+  FileService.invalidateAll();
+  PropertiesService.getUserProperties().deleteProperty('vaultFolderId');
+  SpreadsheetApp.getUi().alert('Cache cleared.');
+}
+
+// ---- server functions called from sidebar / dialog ----
+
+function fetchFileContent(fileName) {
+  return FileService.getFileContent(fileName.endsWith('.md') ? fileName : fileName + '.md');
+}
+
+function reloadFileContent(fileName) {
+  const full = fileName.endsWith('.md') ? fileName : fileName + '.md';
+  FileService.invalidateFile(full);
+  return FileService.getFileContent(full);
+}
+
+// ---- dialog resize ----
+
+function saveDialogSize(width, height) {
+  const props = PropertiesService.getUserProperties();
+  props.setProperty(PROP_DIALOG_WIDTH,  String(clamp_(parseInt(width,  10) || CONFIG.dialogWidth,  CONFIG.dialogMinWidth,  CONFIG.dialogMaxWidth)));
+  props.setProperty(PROP_DIALOG_HEIGHT, String(clamp_(parseInt(height, 10) || CONFIG.dialogHeight, CONFIG.dialogMinHeight, CONFIG.dialogMaxHeight)));
+}
+
+function getDialogSizeConfig() {
+  const dims = getDialogDimensions_();
+  return {
+    width:  dims.width,  height:  dims.height,
+    minWidth:  CONFIG.dialogMinWidth,  maxWidth:  CONFIG.dialogMaxWidth,
+    minHeight: CONFIG.dialogMinHeight, maxHeight: CONFIG.dialogMaxHeight,
+    defaultWidth: CONFIG.dialogWidth,  defaultHeight: CONFIG.dialogHeight
+  };
+}
+
+function resetDialogSize() {
+  const props = PropertiesService.getUserProperties();
+  props.deleteProperty(PROP_DIALOG_WIDTH);
+  props.deleteProperty(PROP_DIALOG_HEIGHT);
+  return { width: CONFIG.dialogWidth, height: CONFIG.dialogHeight };
+}
+
+// ---- internals ----
+
+function getSelectedFileName_() {
+  const ui       = SpreadsheetApp.getUi();
+  const settings = getSettings_();
+  const cell     = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getActiveCell();
+
+  if (cell.getColumn() !== settings.fileNameColumn || cell.getRow() === CONFIG.headerRow) {
+    const colLetter = columnToLetter_(settings.fileNameColumn);
+    ui.alert(`Please select a file name cell in Column ${colLetter} first.`);
+    return null;
+  }
+
+  const raw = String(cell.getValue() || '').trim();
+  if (!raw) { ui.alert('Selected cell is empty.'); return null; }
+  return raw.endsWith('.md') ? raw : raw + '.md';
+}
+
+/** Converts a 1-based column index to its letter (1→A, 3→C, 28→AB). */
+function columnToLetter_(col) {
+  let letter = '';
+  while (col > 0) {
+    const mod = (col - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    col = Math.floor((col - 1) / 26);
+  }
+  return letter;
+}
+
+function showSidebar(fileName) {
+  const html = renderTemplate_('Sidebar', fileName, 'sidebar').setTitle(CONFIG.sidebarTitle);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function showDialog(fileName) {
+  const dims = getDialogDimensions_();
+  const html = renderTemplate_('Dialog', fileName, 'dialog')
+    .setWidth(dims.width)
+    .setHeight(dims.height);
+  SpreadsheetApp.getUi().showModelessDialog(html, fileName);
+}
+
+function getDialogDimensions_() {
+  const props  = PropertiesService.getUserProperties();
+  const savedW = parseInt(props.getProperty(PROP_DIALOG_WIDTH),  10);
+  const savedH = parseInt(props.getProperty(PROP_DIALOG_HEIGHT), 10);
+  return {
+    width:  clamp_(isNaN(savedW) ? CONFIG.dialogWidth  : savedW, CONFIG.dialogMinWidth,  CONFIG.dialogMaxWidth),
+    height: clamp_(isNaN(savedH) ? CONFIG.dialogHeight : savedH, CONFIG.dialogMinHeight, CONFIG.dialogMaxHeight)
+  };
+}
+
+function clamp_(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
+function renderTemplate_(templateName, fileName, mode) {
+  const result = FileService.getFileContent(fileName);
+  const t = HtmlService.createTemplateFromFile(templateName);
+  t.fileName = fileName;
+  t.content  = result.content;
+  t.error    = result.error;
+  t.mode     = mode;
+  return t.evaluate().setSandboxMode(HtmlService.SandboxMode.IFRAME);
+}
+
+function include(templateName, ctx) {
+  const t = HtmlService.createTemplateFromFile(templateName);
+  if (ctx) Object.keys(ctx).forEach(function (k) { t[k] = ctx[k]; });
+  return t.evaluate().getContent();
+}

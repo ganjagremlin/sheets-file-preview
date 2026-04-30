@@ -1,0 +1,462 @@
+<!--
+  Preview.html — shared partial included by both Sidebar.html and Dialog.html.
+  Contains the styles, markdown rendering, and content area.
+
+  Expected template variables (set by including template):
+    fileName  — string
+    content   — string | null
+    error     — string | null
+    mode      — "sidebar" | "dialog"  (controls which buttons render)
+-->
+
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+<style>
+  /* Catppuccin Mocha palette */
+  :root {
+    --base:    #1e1e2e;
+    --mantle:  #181825;
+    --surface0:#313244;
+    --surface1:#45475a;
+    --text:    #cdd6f4;
+    --subtext: #a6adc8;
+    --overlay: #6c7086;
+    --blue:    #89b4fa;
+    --lavender:#b4befe;
+    --green:   #a6e3a1;
+    --yellow:  #f9e2af;
+    --peach:   #fab387;
+    --red:     #f38ba8;
+    --mauve:   #cba6f7;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--base);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* In dialog mode, give the body more breathing room. */
+  body.dialog { font-size: 14px; line-height: 1.65; }
+
+  .header {
+    position: sticky;
+    top: 0;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    padding: 10px 12px;
+    z-index: 10;
+  }
+
+  body.dialog .header { padding: 12px 18px; }
+
+  .header-title {
+    font-size: 13px;
+    color: var(--blue);
+    font-weight: 600;
+    word-break: break-word;
+    margin: 0 0 6px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  body.dialog .header-title { font-size: 15px; margin-bottom: 8px; }
+
+  .header-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .btn {
+    background: var(--surface0);
+    color: var(--text);
+    border: 1px solid var(--surface1);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  body.dialog .btn { font-size: 12px; padding: 5px 10px; }
+
+  .btn:hover  { background: var(--surface1); }
+  .btn:active { background: var(--overlay); }
+  .btn.primary { color: var(--blue); border-color: var(--blue); }
+  .btn.accent  { color: var(--mauve); border-color: var(--mauve); }
+
+  .content {
+    padding: 12px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  body.dialog .content { padding: 18px 22px; max-width: 760px; margin: 0 auto; }
+
+  /* Markdown styling */
+  .content h1, .content h2, .content h3,
+  .content h4, .content h5, .content h6 {
+    color: var(--lavender);
+    font-weight: 600;
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+    line-height: 1.3;
+  }
+  .content h1 { font-size: 18px; border-bottom: 1px solid var(--surface0); padding-bottom: 4px; }
+  .content h2 { font-size: 16px; border-bottom: 1px solid var(--surface0); padding-bottom: 3px; }
+  .content h3 { font-size: 14px; }
+  .content h4, .content h5, .content h6 { font-size: 13px; color: var(--subtext); }
+
+  body.dialog .content h1 { font-size: 24px; }
+  body.dialog .content h2 { font-size: 20px; }
+  body.dialog .content h3 { font-size: 17px; }
+  body.dialog .content h4, body.dialog .content h5, body.dialog .content h6 { font-size: 15px; }
+
+  .content p { margin: 0.6em 0; }
+
+  .content a {
+    color: var(--blue);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--blue);
+  }
+  .content a:hover { color: var(--lavender); border-bottom-style: solid; }
+
+  .content strong { color: var(--peach); font-weight: 600; }
+  .content em { color: var(--yellow); font-style: italic; }
+
+  .content code {
+    background: var(--surface0);
+    color: var(--green);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .content pre {
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 4px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    margin: 0.8em 0;
+  }
+  .content pre code {
+    background: transparent;
+    color: var(--text);
+    padding: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  body.dialog .content pre code { font-size: 13px; }
+
+  .content blockquote {
+    border-left: 3px solid var(--mauve);
+    margin: 0.8em 0;
+    padding: 2px 0 2px 10px;
+    color: var(--subtext);
+    background: var(--mantle);
+  }
+
+  .content ul, .content ol { padding-left: 22px; margin: 0.5em 0; }
+  .content li { margin: 0.2em 0; }
+  .content ul li::marker, .content ol li::marker { color: var(--overlay); }
+
+  .content input[type="checkbox"] {
+    margin-right: 6px;
+    accent-color: var(--green);
+  }
+
+  .content hr {
+    border: none;
+    border-top: 1px solid var(--surface0);
+    margin: 1.2em 0;
+  }
+
+  .content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.8em 0;
+    font-size: 12px;
+  }
+  .content th, .content td {
+    border: 1px solid var(--surface0);
+    padding: 4px 8px;
+    text-align: left;
+  }
+  .content th { background: var(--mantle); color: var(--lavender); }
+
+  .content img { max-width: 100%; height: auto; border-radius: 4px; }
+
+  .status {
+    padding: 12px;
+    border-radius: 4px;
+    margin: 12px;
+    font-size: 12px;
+  }
+  .status.error   { background: rgba(243,139,168,0.1); color: var(--red);    border: 1px solid var(--red); }
+  .status.warning { background: rgba(249,226,175,0.1); color: var(--yellow); border: 1px solid var(--yellow); }
+
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--surface0);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Resize controls — only shown in dialog mode */
+  .resize-row {
+    display: none;
+    gap: 16px;
+    align-items: center;
+    padding: 8px 18px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    font-size: 11px;
+    color: var(--subtext);
+  }
+  body.dialog .resize-row.visible { display: flex; flex-wrap: wrap; }
+
+  .resize-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 200px;
+    min-width: 200px;
+  }
+
+  .resize-control label {
+    color: var(--overlay);
+    font-weight: 500;
+    min-width: 18px;
+  }
+
+  .resize-control input[type="range"] {
+    flex: 1;
+    accent-color: var(--mauve);
+    cursor: pointer;
+  }
+
+  .resize-value {
+    color: var(--lavender);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    min-width: 42px;
+    text-align: right;
+  }
+
+  .resize-row .reset-link {
+    color: var(--blue);
+    cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px dotted var(--blue);
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .resize-row .reset-link:hover { color: var(--lavender); }
+</style>
+
+<div class="header">
+  <div class="header-title">
+    <span>📄</span>
+    <span id="file-name"><?= fileName ?></span>
+  </div>
+  <div class="header-actions">
+    <button class="btn primary" onclick="reloadFile()" title="Reload from Drive (bypasses cache)">↻ Reload</button>
+    <button class="btn" onclick="toggleRaw()" id="toggle-btn">View Raw</button>
+    <? if (mode === 'sidebar') { ?>
+      <button class="btn accent" onclick="popOut()" title="Open in a wider, draggable dialog">↗ Pop out</button>
+    <? } ?>
+    <? if (mode === 'dialog') { ?>
+      <button class="btn" onclick="toggleResize()" id="resize-btn" title="Show or hide resize controls">⇲ Resize</button>
+    <? } ?>
+  </div>
+</div>
+
+<? if (mode === 'dialog') { ?>
+<div class="resize-row" id="resize-row">
+  <div class="resize-control">
+    <label for="width-slider">W</label>
+    <input type="range" id="width-slider" />
+    <span class="resize-value" id="width-value">—</span>
+  </div>
+  <div class="resize-control">
+    <label for="height-slider">H</label>
+    <input type="range" id="height-slider" />
+    <span class="resize-value" id="height-value">—</span>
+  </div>
+  <a class="reset-link" onclick="resetSize()">Reset to default</a>
+</div>
+<? } ?>
+
+<div id="rendered" class="content"></div>
+<pre id="raw" class="content" style="display:none; white-space:pre-wrap; font-family: monospace; font-size: 12px;"></pre>
+
+<script>
+  // Server-side template values are injected here.
+  var FILE_NAME       = <?!= JSON.stringify(fileName) ?>;
+  var INITIAL_CONTENT = <?!= JSON.stringify(content) ?>;
+  var INITIAL_ERROR   = <?!= JSON.stringify(error) ?>;
+  var MODE            = <?!= JSON.stringify(mode) ?>;
+
+  // Apply mode-specific body class for styling.
+  if (MODE === 'dialog') document.body.classList.add('dialog');
+
+  var md = window.markdownit({
+    html: true,         // Enabled for our own injected checkbox HTML.
+    linkify: true,      // Auto-link bare URLs.
+    breaks: false,      // Match Obsidian's default.
+    typographer: true   // Smart quotes etc.
+  });
+
+  function renderContent(content, error) {
+    var rendered = document.getElementById('rendered');
+    var raw      = document.getElementById('raw');
+
+    if (error) {
+      rendered.innerHTML = '<div class="status error">⚠ ' + escapeHtml(error) + '</div>';
+      raw.textContent = '';
+      return;
+    }
+
+    if (!content) {
+      rendered.innerHTML = '<div class="status warning">File is empty.</div>';
+      raw.textContent = '';
+      return;
+    }
+
+    // Render checkbox lists (- [ ] / - [x]) — markdown-it doesn't do this by default.
+    var preprocessed = content
+      .replace(/^(\s*[-*+]\s+)\[ \]\s+/gm,    '$1<input type="checkbox" disabled> ')
+      .replace(/^(\s*[-*+]\s+)\[[xX]\]\s+/gm, '$1<input type="checkbox" checked disabled> ');
+
+    rendered.innerHTML = md.render(preprocessed);
+    raw.textContent = content;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  var showingRaw = false;
+  function toggleRaw() {
+    showingRaw = !showingRaw;
+    document.getElementById('rendered').style.display = showingRaw ? 'none' : 'block';
+    document.getElementById('raw').style.display      = showingRaw ? 'block' : 'none';
+    document.getElementById('toggle-btn').textContent = showingRaw ? 'View Rendered' : 'View Raw';
+  }
+
+  function reloadFile() {
+    var rendered = document.getElementById('rendered');
+    rendered.innerHTML = '<div class="content"><span class="spinner"></span> Reloading…</div>';
+    google.script.run
+      .withSuccessHandler(function (result) { renderContent(result.content, result.error); })
+      .withFailureHandler(function (err)    { renderContent(null, err.message || 'Failed to reload.'); })
+      .reloadFileContent(FILE_NAME);
+  }
+
+  function popOut() {
+    google.script.run
+      .withFailureHandler(function (err) {
+        alert('Could not open dialog: ' + (err.message || err));
+      })
+      .showDialogForFile(FILE_NAME);
+  }
+
+  // --- Dialog resize controls (dialog mode only) ---
+
+  function toggleResize() {
+    var row = document.getElementById('resize-row');
+    if (!row) return;
+    row.classList.toggle('visible');
+  }
+
+  function applySize(width, height) {
+    // Live resize via google.script.host. Note: this works only in dialogs,
+    // not sidebars.
+    if (google.script.host && google.script.host.setWidth) {
+      google.script.host.setWidth(width);
+      google.script.host.setHeight(height);
+    }
+  }
+
+  function setupResizeControls() {
+    var widthSlider  = document.getElementById('width-slider');
+    var heightSlider = document.getElementById('height-slider');
+    var widthVal     = document.getElementById('width-value');
+    var heightVal    = document.getElementById('height-value');
+
+    if (!widthSlider) return; // not in dialog mode
+
+    google.script.run
+      .withSuccessHandler(function (cfg) {
+        widthSlider.min   = cfg.minWidth;
+        widthSlider.max   = cfg.maxWidth;
+        widthSlider.step  = 10;
+        widthSlider.value = cfg.width;
+
+        heightSlider.min   = cfg.minHeight;
+        heightSlider.max   = cfg.maxHeight;
+        heightSlider.step  = 10;
+        heightSlider.value = cfg.height;
+
+        widthVal.textContent  = cfg.width  + 'px';
+        heightVal.textContent = cfg.height + 'px';
+
+        // Live resize while dragging.
+        widthSlider.addEventListener('input', function () {
+          var w = parseInt(widthSlider.value, 10);
+          var h = parseInt(heightSlider.value, 10);
+          widthVal.textContent = w + 'px';
+          applySize(w, h);
+        });
+        heightSlider.addEventListener('input', function () {
+          var w = parseInt(widthSlider.value, 10);
+          var h = parseInt(heightSlider.value, 10);
+          heightVal.textContent = h + 'px';
+          applySize(w, h);
+        });
+
+        // Persist on release.
+        var persist = function () {
+          var w = parseInt(widthSlider.value, 10);
+          var h = parseInt(heightSlider.value, 10);
+          google.script.run.saveDialogSize(w, h);
+        };
+        widthSlider.addEventListener('change', persist);
+        heightSlider.addEventListener('change', persist);
+      })
+      .withFailureHandler(function (err) {
+        console.warn('Could not load resize config:', err);
+      })
+      .getDialogSizeConfig();
+  }
+
+  function resetSize() {
+    google.script.run
+      .withSuccessHandler(function (defaults) {
+        var widthSlider  = document.getElementById('width-slider');
+        var heightSlider = document.getElementById('height-slider');
+        var widthVal     = document.getElementById('width-value');
+        var heightVal    = document.getElementById('height-value');
+
+        widthSlider.value  = defaults.width;
+        heightSlider.value = defaults.height;
+        widthVal.textContent  = defaults.width  + 'px';
+        heightVal.textContent = defaults.height + 'px';
+        applySize(defaults.width, defaults.height);
+      })
+      .resetDialogSize();
+  }
+
+  if (MODE === 'dialog') {
+    setupResizeControls();
+  }
+
+  // Initial render from server-injected values.
+  renderContent(INITIAL_CONTENT, INITIAL_ERROR);
+</script>

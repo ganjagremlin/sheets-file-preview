@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root {
+      --base:    #1e1e2e;
+      --mantle:  #181825;
+      --surface0:#313244;
+      --surface1:#45475a;
+      --text:    #cdd6f4;
+      --subtext: #a6adc8;
+      --overlay: #6c7086;
+      --blue:    #89b4fa;
+      --lavender:#b4befe;
+      --green:   #a6e3a1;
+      --yellow:  #f9e2af;
+      --red:     #f38ba8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--base);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 13px;
+      padding: 0;
+    }
+
+    .header {
+      background: var(--mantle);
+      border-bottom: 1px solid var(--surface0);
+      padding: 16px 20px 12px;
+    }
+
+    .header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--lavender);
+      margin-bottom: 4px;
+    }
+
+    .header p {
+      font-size: 12px;
+      color: var(--subtext);
+      line-height: 1.5;
+    }
+
+    .body { padding: 20px; }
+
+    .field { margin-bottom: 18px; }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--subtext);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      background: var(--mantle);
+      border: 1px solid var(--surface0);
+      border-radius: 5px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus, input[type="number"]:focus {
+      border-color: var(--blue);
+    }
+    input.error { border-color: var(--red); }
+
+    .hint {
+      font-size: 11px;
+      color: var(--overlay);
+      margin-top: 5px;
+      line-height: 1.4;
+    }
+
+    .feedback {
+      display: none;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 5px;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .feedback.error   { display: block; background: rgba(243,139,168,0.12); color: var(--red);   border: 1px solid var(--red);   }
+    .feedback.success { display: block; background: rgba(166,227,161,0.12); color: var(--green); border: 1px solid var(--green); }
+
+    .footer {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--surface0);
+      background: var(--mantle);
+    }
+
+    .btn {
+      background: var(--surface0);
+      color: var(--text);
+      border: 1px solid var(--surface1);
+      border-radius: 5px;
+      padding: 7px 16px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .btn:hover  { background: var(--surface1); }
+    .btn:active { background: var(--overlay); }
+    .btn.primary {
+      background: var(--blue);
+      color: var(--base);
+      border-color: var(--blue);
+      font-weight: 600;
+    }
+    .btn.primary:hover   { background: var(--lavender); border-color: var(--lavender); }
+    .btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .spinner-inline {
+      display: inline-block;
+      width: 11px; height: 11px;
+      border: 2px solid rgba(30,30,46,0.3);
+      border-top-color: var(--base);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📄 Notes — Setup</h1>
+    <? if (isFirstRun) { ?>
+      <p>Welcome! Before you start previewing notes, tell the script where your Obsidian vault lives and which column contains your file names.</p>
+    <? } else { ?>
+      <p>Update your vault folder name or the column where file names are stored.</p>
+    <? } ?>
+  </div>
+
+  <div class="body">
+    <div id="feedback" class="feedback"></div>
+
+    <div class="field">
+      <label for="vault-folder">Vault folder name</label>
+      <input
+        type="text"
+        id="vault-folder"
+        value="<?= vaultFolderName ?>"
+        placeholder="obsidian"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <p class="hint">The name of the top-level Google Drive folder containing your markdown files. This is checked against your Drive — make sure it matches exactly.</p>
+    </div>
+
+    <div class="field">
+      <label for="file-col">File name column number</label>
+      <input
+        type="number"
+        id="file-col"
+        value="<?= fileNameColumn ?>"
+        min="1"
+        max="26"
+        placeholder="3"
+      />
+      <p class="hint">The column containing your note file names (A = 1, B = 2, C = 3 …). Click a cell in that column and check the column letter in the sheet to confirm.</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <? if (!isFirstRun) { ?>
+      <button class="btn" onclick="google.script.host.close()">Cancel</button>
+    <? } ?>
+    <button class="btn primary" id="save-btn" onclick="save()">Save settings</button>
+  </div>
+
+  <script>
+    function save() {
+      var folderInput = document.getElementById('vault-folder');
+      var colInput    = document.getElementById('file-col');
+      var feedback    = document.getElementById('feedback');
+      var saveBtn     = document.getElementById('save-btn');
+
+      var folder = folderInput.value.trim();
+      var col    = parseInt(colInput.value, 10);
+
+      // Client-side validation first — catches obvious errors before a server round-trip.
+      folderInput.classList.remove('error');
+      colInput.classList.remove('error');
+      feedback.className = 'feedback';
+      feedback.textContent = '';
+
+      var errors = [];
+      if (!folder) {
+        folderInput.classList.add('error');
+        errors.push('Vault folder name is required.');
+      }
+      if (isNaN(col) || col < 1 || col > 26) {
+        colInput.classList.add('error');
+        errors.push('Column must be a number between 1 and 26.');
+      }
+      if (errors.length) {
+        feedback.className = 'feedback error';
+        feedback.textContent = errors.join(' ');
+        return;
+      }
+
+      // Disable the button and show a spinner while the server validates
+      // the folder name against Drive.
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner-inline"></span>Checking Drive…';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          if (result.ok) {
+            feedback.className = 'feedback success';
+            feedback.textContent = '✓ Settings saved. Reload the sheet to apply.';
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save settings';
+            // Close after a short pause so the user sees the success message.
+            setTimeout(function () { google.script.host.close(); }, 1200);
+          } else {
+            feedback.className = 'feedback error';
+            feedback.textContent = result.error;
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save settings';
+          }
+        })
+        .withFailureHandler(function (err) {
+          feedback.className = 'feedback error';
+          feedback.textContent = 'Unexpected error: ' + (err.message || err);
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save settings';
+        })
+        .saveSettings(folder, col);
+    }
+
+    // Allow Enter key to submit.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !document.getElementById('save-btn').disabled) save();
+    });
+  </script>
+</body>
+</html>

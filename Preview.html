@@ -1,12 +1,19 @@
 <!--
   Preview.html — shared partial included by both Sidebar.html and Dialog.html.
-  Contains the styles, markdown rendering, and content area.
+  Contains the styles, rendering logic, and content area.
+
+  Supports three render modes, determined client-side by file extension / MIME type:
+    markdown  — rendered with markdown-it (existing behaviour)
+    text      — plain text shown in a <pre> block
+    iframe    — Google Drive preview iframe (PDFs, images, DOCX, XLSX, etc.)
 
   Expected template variables (set by including template):
     fileName  — string
-    content   — string | null
+    content   — string | null   (text/markdown only; null for iframe types)
+    fileId    — string | null   (Drive file ID; used to build iframe URL)
+    mimeType  — string | null   (Drive MIME type)
     error     — string | null
-    mode      — "sidebar" | "dialog"  (controls which buttons render)
+    mode      — "sidebar" | "dialog"
 -->
 
 <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
@@ -31,6 +38,10 @@
 
   * { box-sizing: border-box; }
 
+  html {
+    height: 100%;
+  }
+
   html, body {
     margin: 0;
     padding: 0;
@@ -41,10 +52,18 @@
     line-height: 1.55;
   }
 
+  /* Flex column so the content/iframe area fills remaining height */
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
   /* In dialog mode, give the body more breathing room. */
   body.dialog { font-size: 14px; line-height: 1.65; }
 
   .header {
+    flex-shrink: 0;
     position: sticky;
     top: 0;
     background: var(--mantle);
@@ -86,6 +105,13 @@
   .btn:active { background: var(--overlay); }
   .btn.primary { color: var(--blue); border-color: var(--blue); }
   .btn.accent  { color: var(--mauve); border-color: var(--mauve); }
+
+  /* ---- Scroll area (text / markdown) ---- */
+  #scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
 
   .content {
     padding: 12px;
@@ -151,6 +177,21 @@
   }
   body.dialog .content pre code { font-size: 13px; }
 
+  /* Plain-text mode: full-width pre without inner padding tricks */
+  .content .plain-text {
+    white-space: pre-wrap;
+    overflow-wrap: break-word; /* only break mid-word when a token is truly too long */
+    font-family: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+  body.dialog .content .plain-text { font-size: 13px; }
+
   .content blockquote {
     border-left: 3px solid var(--mauve);
     margin: 0.8em 0;
@@ -209,8 +250,24 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ---- Iframe area ---- */
+  #iframe-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: none; /* shown by JS when render mode is iframe */
+  }
+
+  #preview-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    background: #fff; /* Drive preview has a white bg */
+  }
+
   /* Resize controls — only shown in dialog mode */
   .resize-row {
+    flex-shrink: 0;
     display: none;
     gap: 16px;
     align-items: center;
@@ -262,7 +319,7 @@
 
 <div class="header">
   <div class="header-title">
-    <span>📄</span>
+    <span id="file-icon">📄</span>
     <span id="file-name"><?= fileName ?></span>
   </div>
   <div class="header-actions">
@@ -293,12 +350,22 @@
 </div>
 <? } ?>
 
-<div id="rendered" class="content"></div>
-<pre id="raw" class="content" style="display:none; white-space:pre-wrap; font-family: monospace; font-size: 12px;"></pre>
+<!-- Text / markdown content area -->
+<div id="scroll-area">
+  <div id="rendered" class="content"></div>
+  <pre id="raw" class="content" style="display:none; white-space:pre-wrap; font-family: monospace; font-size: 12px;"></pre>
+</div>
+
+<!-- Drive iframe preview area (PDFs, images, DOCX, etc.) -->
+<div id="iframe-wrapper">
+  <iframe id="preview-iframe" allowfullscreen></iframe>
+</div>
 
 <script>
-  // Server-side template values are injected here.
+  // ---- Server-injected template values ----
   var FILE_NAME       = <?!= JSON.stringify(fileName) ?>;
+  var FILE_ID         = <?!= JSON.stringify(fileId) ?>;
+  var MIME_TYPE       = <?!= JSON.stringify(mimeType) ?>;
   var INITIAL_CONTENT = <?!= JSON.stringify(content) ?>;
   var INITIAL_ERROR   = <?!= JSON.stringify(error) ?>;
   var MODE            = <?!= JSON.stringify(mode) ?>;
@@ -306,13 +373,71 @@
   // Apply mode-specific body class for styling.
   if (MODE === 'dialog') document.body.classList.add('dialog');
 
-  var md = window.markdownit({
-    html: true,         // Enabled for our own injected checkbox HTML.
-    linkify: true,      // Auto-link bare URLs.
-    breaks: false,      // Match Obsidian's default.
-    typographer: true   // Smart quotes etc.
-  });
+  // ---- Render mode detection ----
 
+  /**
+   * Determines how to render based on file extension first, MIME type second.
+   * Returns 'markdown', 'text', or 'iframe'.
+   */
+  function getRenderMode(fileName, mimeType) {
+    var lower = (fileName || '').toLowerCase();
+    if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown';
+    if (lower.endsWith('.txt')) return 'text';
+    // Fallback: if Drive reports a plain text MIME, treat as text.
+    if (mimeType === 'text/plain' || mimeType === 'text/markdown' ||
+        mimeType === 'text/x-markdown') return 'text';
+    return 'iframe';
+  }
+
+  var RENDER_MODE = getRenderMode(FILE_NAME, MIME_TYPE);
+
+  // ---- markdown-it setup (markdown mode only) ----
+  var md;
+  if (RENDER_MODE === 'markdown') {
+    md = window.markdownit({
+      html: true,
+      linkify: true,
+      breaks: false,
+      typographer: true
+    });
+  }
+
+  // ---- File-type icon ----
+  function getFileIcon(fileName, mimeType) {
+    var lower = (fileName || '').toLowerCase();
+    if (lower.endsWith('.pdf'))  return '📕';
+    if (lower.endsWith('.docx') || lower.endsWith('.doc'))  return '📝';
+    if (lower.endsWith('.xlsx') || lower.endsWith('.xls') ||
+        lower.endsWith('.csv'))  return '📊';
+    if (lower.endsWith('.pptx') || lower.endsWith('.ppt'))  return '📋';
+    if (lower.match(/\.(png|jpg|jpeg|gif|webp|svg|bmp|tiff?)$/)) return '🖼️';
+    if (lower.endsWith('.txt')) return '📃';
+    if (lower.endsWith('.md') || lower.endsWith('.markdown')) return '📄';
+    return '📄';
+  }
+
+  document.getElementById('file-icon').textContent = getFileIcon(FILE_NAME, MIME_TYPE);
+
+  // ---- Button visibility ----
+  // "View Raw" only makes sense for markdown (where there are two distinct views).
+  if (RENDER_MODE !== 'markdown') {
+    var toggleBtn = document.getElementById('toggle-btn');
+    if (toggleBtn) toggleBtn.style.display = 'none';
+  }
+
+  // ---- Content rendering ----
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * Renders text/markdown content into #rendered and #raw.
+   * For iframe mode this is only called to show errors.
+   */
   function renderContent(content, error) {
     var rendered = document.getElementById('rendered');
     var raw      = document.getElementById('raw');
@@ -329,18 +454,56 @@
       return;
     }
 
-    // Render checkbox lists (- [ ] / - [x]) — markdown-it doesn't do this by default.
-    var preprocessed = content
-      .replace(/^(\s*[-*+]\s+)\[ \]\s+/gm,    '$1<input type="checkbox" disabled> ')
-      .replace(/^(\s*[-*+]\s+)\[[xX]\]\s+/gm, '$1<input type="checkbox" checked disabled> ');
-
-    rendered.innerHTML = md.render(preprocessed);
-    raw.textContent = content;
+    if (RENDER_MODE === 'markdown') {
+      var preprocessed = content
+        .replace(/^(\s*[-*+]\s+)\[ \]\s+/gm,    '$1<input type="checkbox" disabled> ')
+        .replace(/^(\s*[-*+]\s+)\[[xX]\]\s+/gm, '$1<input type="checkbox" checked disabled> ');
+      rendered.innerHTML = md.render(preprocessed);
+      raw.textContent = content;
+    } else {
+      // text mode
+      rendered.innerHTML = '<pre class="plain-text">' + escapeHtml(content) + '</pre>';
+      raw.textContent = content;
+    }
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  /**
+   * Shows the Drive iframe for the given file ID, hiding the scroll area.
+   */
+  function showIframe(fileId) {
+    var scrollArea  = document.getElementById('scroll-area');
+    var iframeWrap  = document.getElementById('iframe-wrapper');
+    var iframe      = document.getElementById('preview-iframe');
+
+    scrollArea.style.display = 'none';
+    iframeWrap.style.display = 'block';
+    iframe.src = 'https://drive.google.com/file/d/' + fileId + '/preview';
   }
+
+  // ---- Reload ----
+
+  function reloadFile() {
+    if (RENDER_MODE === 'iframe') {
+      // For iframe mode, just bounce the iframe src.
+      var iframe = document.getElementById('preview-iframe');
+      if (iframe && FILE_ID) {
+        iframe.src = '';
+        setTimeout(function () {
+          iframe.src = 'https://drive.google.com/file/d/' + FILE_ID + '/preview';
+        }, 50);
+      }
+      return;
+    }
+
+    var rendered = document.getElementById('rendered');
+    rendered.innerHTML = '<div class="content"><span class="spinner"></span> Reloading…</div>';
+    google.script.run
+      .withSuccessHandler(function (result) { renderContent(result.content, result.error); })
+      .withFailureHandler(function (err)    { renderContent(null, err.message || 'Failed to reload.'); })
+      .reloadFileContent(FILE_NAME);
+  }
+
+  // ---- Raw / rendered toggle (markdown only) ----
 
   var showingRaw = false;
   function toggleRaw() {
@@ -350,14 +513,7 @@
     document.getElementById('toggle-btn').textContent = showingRaw ? 'View Rendered' : 'View Raw';
   }
 
-  function reloadFile() {
-    var rendered = document.getElementById('rendered');
-    rendered.innerHTML = '<div class="content"><span class="spinner"></span> Reloading…</div>';
-    google.script.run
-      .withSuccessHandler(function (result) { renderContent(result.content, result.error); })
-      .withFailureHandler(function (err)    { renderContent(null, err.message || 'Failed to reload.'); })
-      .reloadFileContent(FILE_NAME);
-  }
+  // ---- Pop out (sidebar mode only) ----
 
   function popOut() {
     google.script.run
@@ -367,7 +523,7 @@
       .showDialogForFile(FILE_NAME);
   }
 
-  // --- Dialog resize controls (dialog mode only) ---
+  // ---- Dialog resize controls (dialog mode only) ----
 
   function toggleResize() {
     var row = document.getElementById('resize-row');
@@ -376,8 +532,6 @@
   }
 
   function applySize(width, height) {
-    // Live resize via google.script.host. Note: this works only in dialogs,
-    // not sidebars.
     if (google.script.host && google.script.host.setWidth) {
       google.script.host.setWidth(width);
       google.script.host.setHeight(height);
@@ -390,7 +544,7 @@
     var widthVal     = document.getElementById('width-value');
     var heightVal    = document.getElementById('height-value');
 
-    if (!widthSlider) return; // not in dialog mode
+    if (!widthSlider) return;
 
     google.script.run
       .withSuccessHandler(function (cfg) {
@@ -407,7 +561,6 @@
         widthVal.textContent  = cfg.width  + 'px';
         heightVal.textContent = cfg.height + 'px';
 
-        // Live resize while dragging.
         widthSlider.addEventListener('input', function () {
           var w = parseInt(widthSlider.value, 10);
           var h = parseInt(heightSlider.value, 10);
@@ -421,7 +574,6 @@
           applySize(w, h);
         });
 
-        // Persist on release.
         var persist = function () {
           var w = parseInt(widthSlider.value, 10);
           var h = parseInt(heightSlider.value, 10);
@@ -457,6 +609,18 @@
     setupResizeControls();
   }
 
-  // Initial render from server-injected values.
-  renderContent(INITIAL_CONTENT, INITIAL_ERROR);
+  // ---- Initial render ----
+
+  if (RENDER_MODE === 'iframe') {
+    if (INITIAL_ERROR) {
+      // File found but something went wrong — show error in the scroll area.
+      renderContent(null, INITIAL_ERROR);
+    } else if (FILE_ID) {
+      showIframe(FILE_ID);
+    } else {
+      renderContent(null, 'Could not retrieve file ID for Drive preview.');
+    }
+  } else {
+    renderContent(INITIAL_CONTENT, INITIAL_ERROR);
+  }
 </script>

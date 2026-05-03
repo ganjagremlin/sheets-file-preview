@@ -77,7 +77,7 @@ function previewSelectedFileAsDialog() {
 
 /** Called from the sidebar's "Pop out" button via google.script.run. */
 function showDialogForFile(fileName) {
-  showDialog(fileName.endsWith('.md') ? fileName : fileName + '.md');
+  showDialog(fileName);
 }
 
 // ---- setup & settings ----
@@ -160,13 +160,12 @@ function clearAllCaches() {
 // ---- server functions called from sidebar / dialog ----
 
 function fetchFileContent(fileName) {
-  return FileService.getFileContent(fileName.endsWith('.md') ? fileName : fileName + '.md');
+  return FileService.getFileData(fileName);
 }
 
 function reloadFileContent(fileName) {
-  const full = fileName.endsWith('.md') ? fileName : fileName + '.md';
-  FileService.invalidateFile(full);
-  return FileService.getFileContent(full);
+  FileService.invalidateFile(fileName);
+  return FileService.getFileData(fileName);
 }
 
 // ---- dialog resize ----
@@ -209,7 +208,18 @@ function getSelectedFileName_() {
 
   const raw = String(cell.getValue() || '').trim();
   if (!raw) { ui.alert('Selected cell is empty.'); return null; }
-  return raw.endsWith('.md') ? raw : raw + '.md';
+  // Bare names (no extension) are assumed to be markdown — backward compat.
+  // Names with any extension (e.g. report.pdf, photo.jpg) are used as-is.
+  return hasExtension_(raw) ? raw : raw + '.md';
+}
+
+/**
+ * Returns true if the name has a file extension (a dot with at least one
+ * character after it that isn't itself a dot).
+ */
+function hasExtension_(name) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1;
 }
 
 /** Converts a 1-based column index to its letter (1→A, 3→C, 28→AB). */
@@ -249,10 +259,12 @@ function getDialogDimensions_() {
 function clamp_(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
 function renderTemplate_(templateName, fileName, mode) {
-  const result = FileService.getFileContent(fileName);
+  const result = FileService.getFileData(fileName);
   const t = HtmlService.createTemplateFromFile(templateName);
   t.fileName = fileName;
   t.content  = result.content;
+  t.fileId   = result.fileId;
+  t.mimeType = result.mimeType;
   t.error    = result.error;
   t.mode     = mode;
   return t.evaluate().setSandboxMode(HtmlService.SandboxMode.IFRAME);

@@ -8,6 +8,12 @@
  *    walk on cache hits.
  *  - We track all cache keys we've written in PropertiesService so we can
  *    invalidate everything on demand (CacheService has no "clear all").
+ *
+ * Future multi-folder support: findFile() accepts an optional rootFolder
+ * argument. When non-null it searches that folder directly instead of
+ * resolving the configured vault folder. Callers that need per-row folder
+ * overrides can pass a DriveApp.Folder object here without touching the
+ * rest of the service.
  */
 const FileService = (function () {
   const CONTENT_PREFIX = 'content::';
@@ -15,31 +21,51 @@ const FileService = (function () {
   const KEY_INDEX_PROP = 'cacheKeyIndex';
 
   /**
-   * Public: returns { content, error } for a given file name.
+   * Returns true for file types we fetch as text (render ourselves).
+   * Everything else gets a Drive iframe preview.
    */
-  function getFileContent(fileName) {
-    const cache = CacheService.getUserCache();
-    const cacheKey = CONTENT_PREFIX + fileName;
+  function isTextType_(fileName) {
+    const lower = (fileName || '').toLowerCase();
+    return lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.txt');
+  }
 
-    const cached = cache.get(cacheKey);
-    if (cached !== null) {
-      return { content: cached, error: null };
-    }
-
+  /**
+   * Public: returns { content, fileId, mimeType, error } for a given file name.
+   *
+   * For text types (.md, .markdown, .txt) content is the raw file string.
+   * For all other types content is null — the caller should use fileId to
+   * build a Drive iframe preview URL instead of fetching content.
+   */
+  function getFileData(fileName) {
     try {
       const file = findFile(fileName);
       if (!file) {
-        return {
-          content: null,
-          error: `File not found in vault: ${fileName}`
-        };
+        return { content: null, fileId: null, mimeType: null,
+                 error: `File not found in vault: ${fileName}` };
+      }
+
+      const fileId  = file.getId();
+      const mimeType = file.getMimeType();
+
+      if (!isTextType_(fileName)) {
+        // Non-text: return just the ID; no blob download needed.
+        return { content: null, fileId: fileId, mimeType: mimeType, error: null };
+      }
+
+      // Text types: check content cache first.
+      const cache    = CacheService.getUserCache();
+      const cacheKey = CONTENT_PREFIX + fileName;
+      const cached   = cache.get(cacheKey);
+      if (cached !== null) {
+        return { content: cached, fileId: fileId, mimeType: mimeType, error: null };
       }
 
       const content = file.getBlob().getDataAsString();
       putCache(cacheKey, content);
-      return { content: content, error: null };
+      return { content: content, fileId: fileId, mimeType: mimeType, error: null };
     } catch (err) {
-      return { content: null, error: `Error reading file: ${err.message}` };
+      return { content: null, fileId: null, mimeType: null,
+               error: `Error reading file: ${err.message}` };
     }
   }
 
@@ -76,8 +102,13 @@ const FileService = (function () {
   /**
    * Finds a file by name within the configured vault folder, recursively.
    * Uses cached file ID when available.
+   *
+   * @param {string} fileName
+   * @param {Folder|null} rootFolder  Optional override; when provided the
+   *   vault folder setting is ignored and this folder is searched instead.
+   *   Pass null (or omit) to use the configured vault folder.
    */
-  function findFile(fileName) {
+  function findFile(fileName, rootFolder) {
     // Fast path: cached file ID
     const cache = CacheService.getUserCache();
     const idKey = FILEID_PREFIX + fileName;
@@ -90,7 +121,7 @@ const FileService = (function () {
       }
     }
 
-    const vault = getVaultFolder();
+    const vault = rootFolder || getVaultFolder();
     const file = searchFolderRecursive(vault, fileName);
     if (file) {
       putCache(idKey, file.getId());
@@ -173,7 +204,7 @@ const FileService = (function () {
   }
 
   return {
-    getFileContent: getFileContent,
+    getFileData: getFileData,
     invalidateAll: invalidateAll,
     invalidateFile: invalidateFile
   };

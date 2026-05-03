@@ -1,8 +1,8 @@
-# 📄 Markdown File Preview for Google Sheets
+# 📄 File Preview for Google Sheets
 
-Preview your Markdown files directly inside Google Sheets — without leaving the spreadsheet.
+Preview files stored in Google Drive directly inside Google Sheets — without leaving the spreadsheet.
 
-If you use Google Sheets to track or index your Markdown files or Obsidian vault (synced to Google Drive), this script adds a sidebar that shows the rendered markdown of whichever note you click on. Need more room? Pop it out into a resizable floating dialog.
+If you use Google Sheets to track or index files in Google Drive (such as an Obsidian vault synced via [Obsidian Sync](https://obsidian.md/sync) or [Remotely Save](https://github.com/remotely-save/remotely-save)), this script adds a sidebar that previews whichever file you click on. Need more room? Pop it out into a resizable floating dialog.
 
 ![Preview sidebar demo](docs/demo.gif)
 
@@ -10,20 +10,23 @@ If you use Google Sheets to track or index your Markdown files or Obsidian vault
 
 ## Features
 
-- **Rendered markdown** — headings, bold, italic, code blocks, tables, task lists, blockquotes, links
+- **Multi-format preview** — three render modes selected automatically by file type:
+  - **Markdown** (`.md`) — fully rendered with headings, bold, italic, code blocks, tables, task lists, blockquotes, and links
+  - **Plain text** (`.txt`) — displayed in a monospace block with proper word wrapping
+  - **Everything else** — PDFs, images (PNG, JPG, GIF, etc.), DOCX, XLSX, PPTX, and any other Drive-supported format shown via Google Drive's built-in viewer
 - **Sidebar** that stays open as you click between rows
 - **Resizable dialog** (pop-out) when you need more reading room
 - **Guided setup** — a settings dialog on first run; no manual config file editing
 - **Fast** — recursive Drive search scoped to your vault folder, with multi-layer caching (folder ID, file ID, file content)
 - **Reload button** — bypass the cache and fetch fresh content from Drive on demand
-- **Raw / rendered toggle** — switch between rendered markdown and the raw source
+- **Raw / rendered toggle** — switch between rendered markdown and the raw source (markdown files only)
 
 ---
 
 ## Requirements
 
 - A Google Sheet with file names in one of its columns
-- Any method that puts `.md` files in Drive. Such as: an Obsidian vault synced to Google Drive (via [Obsidian Sync](https://obsidian.md/sync), [Remotely Save](https://github.com/remotely-save/remotely-save))
+- Files stored in a Google Drive folder (e.g. an Obsidian vault synced to Drive)
 - A Google account with access to both the Sheet and the Drive folder
 
 ---
@@ -77,16 +80,18 @@ No tools required, but you'll need to repeat these steps for each new sheet.
 
 However you installed, the **📄 Notes** setup dialog appears automatically the first time the sheet opens. It asks for two things:
 
-- **Vault folder name** — the name of the top-level Google Drive folder containing your markdown files (e.g. `obsidian`, `My Vault`). The script verifies this folder exists before saving.
-- **File name column** — the column number where your note file names live (A = 1, B = 2, C = 3, etc.).
+- **Vault folder name** — the name of the top-level Google Drive folder containing your files (e.g. `obsidian`, `My Vault`). The script verifies this folder exists before saving.
+- **File name column** — the column number where your file names live (A = 1, B = 2, C = 3, etc.).
 
 Click **Save settings**. You're ready. You can reopen this dialog any time via **📄 Notes → Settings**.
 
 ---
 
-1. Click any cell in your file name column containing a note name.
+## Usage
+
+1. Click any cell in your file name column containing a file name.
 2. Click **📄 Notes → Preview Selected File** in the menu bar.
-3. The sidebar opens on the right showing the rendered note.
+3. The sidebar opens on the right showing the preview.
 
 To open as a wider, draggable dialog instead: **📄 Notes → Preview Selected File (Dialog)**, or click the **↗ Pop out** button inside the sidebar.
 
@@ -98,15 +103,17 @@ To resize the dialog: click **⇲ Resize** in the dialog header. Two sliders app
 
 The script works with any sheet layout. During setup you specify which column contains your file names — the default is Column C.
 
-File names may include or omit the `.md` extension; both are handled.
+File names may include or omit the `.md` extension for markdown files; both are handled. All other file types should include their extension (e.g. `report.pdf`, `photo.png`).
 
 **Example layout:**
 
 | Column A | Column B | Column C |
 |---|---|---|
-| Date | Note title | File name |
+| Date | Title | File name |
 | 2024-01-15 | Weekly review | 2024-W03 weekly review |
 | 2024-01-20 | Project notes | project-alpha.md |
+| 2024-02-01 | Q1 Budget | budget-q1.xlsx |
+| 2024-02-10 | Design mockup | mockup-v2.png |
 
 Row 1 is treated as a header row and is skipped.
 
@@ -144,7 +151,7 @@ Three layers, all per-user:
 
 1. **Vault folder ID** — stored permanently in `PropertiesService`. Resolved once from the folder name, reused after that. Self-heals automatically if the folder is renamed or moved.
 2. **File ID by name** — stored in `CacheService` for 5 minutes. Skips the recursive folder walk on cache hits.
-3. **File content** — stored in `CacheService` for 5 minutes. Files larger than 100 KB are always fetched fresh (CacheService per-entry limit).
+3. **File content** — stored in `CacheService` for 5 minutes, for text-based files (`.md`, `.txt`) only. Non-text files (PDFs, images, etc.) are rendered via Drive's viewer directly from their file ID — no content is fetched or cached.
 
 **Cache is invalidated automatically** when you save settings. You can also clear it manually via **📄 Notes → Clear Cache**, or reload a single file with the **↻ Reload** button in the sidebar/dialog.
 
@@ -152,10 +159,11 @@ Three layers, all per-user:
 
 ## Known limitations
 
-- **Sidebar width is fixed at 300px** — this is a hard limit of the Google Apps Script platform, not something the script can change. Use the pop-out dialog when you need more room.
+- **Sidebar width is fixed at 300px** — this is a hard limit of the Google Apps Script platform, not something the script can change. Use the pop-out dialog when you need more room, especially for PDFs and documents.
 - **The dialog closes when you click the sheet** — standard Apps Script modeless dialog behavior. The sidebar stays open.
 - **Preview requires a menu click** — Apps Script doesn't allow running code on cell click, so there's no way to trigger the preview automatically when you select a row.
 - **Obsidian-specific syntax is not rendered** — `[[wikilinks]]`, `![[embeds]]`, `> [!callout]` blocks, and `#tags` display as plain text. Standard markdown is fully rendered.
+- **Drive viewer requires network access** — PDFs, images, and other non-text file types are rendered by Google Drive's built-in viewer, which requires an internet connection and that the file be accessible to the authenticated user.
 - **First preview may be slow** — the script walks your vault folder tree to find the file. Subsequent previews of the same file are fast (cached file ID).
 
 ---
@@ -167,7 +175,8 @@ Three layers, all per-user:
 | 📄 Notes menu missing | `onOpen` hasn't run | Refresh the sheet |
 | Setup dialog doesn't appear on first open | Auth hasn't been granted yet | Run any function from the Apps Script editor, approve permissions, then refresh |
 | "Vault folder not found" error | Folder name doesn't match Drive exactly | Go to **📄 Notes → Settings** and correct the name |
-| "File not found in vault" | Typo in the cell, or file is in a Drive folder outside the vault | Check the file name; run **Clear Cache** if you recently moved files |
+| "File not found in vault" | Typo in the cell, wrong extension, or file is outside the vault folder | Check the file name and extension; run **Clear Cache** if you recently moved files |
+| PDF / image shows blank or loading spinner | Drive viewer blocked by network, or file permissions | Check network access; confirm the file is in a folder accessible to your account |
 | Stale content showing | Cache TTL hasn't expired | Click **↻ Reload** in the sidebar or dialog |
 | Markdown not rendering (showing raw text) | jsDelivr CDN blocked by network or browser | Check your network; the CDN URL is in `Preview.html` |
 | Authorization error after install | Permissions weren't granted | Re-run any function from the editor and approve |
@@ -176,7 +185,7 @@ Three layers, all per-user:
 
 ## Privacy
 
-This script runs entirely within your Google account. Your note content is never sent anywhere except between your Google Drive and your browser via Apps Script's sandboxed HTML service. The script has no external dependencies except the [markdown-it](https://github.com/markdown-it/markdown-it) library loaded from [jsDelivr](https://www.jsdelivr.com/) CDN for rendering.
+This script runs entirely within your Google account. For markdown and plain text files, content travels only between your Google Drive and your browser via Apps Script's sandboxed HTML service. For all other file types (PDFs, images, documents, etc.), files are rendered directly by Google Drive's viewer — no content passes through the script at all. The only external dependency is the [markdown-it](https://github.com/markdown-it/markdown-it) library loaded from [jsDelivr](https://www.jsdelivr.com/) CDN for markdown rendering.
 
 ---
 

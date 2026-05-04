@@ -81,7 +81,7 @@ No tools required, but you'll need to repeat these steps for each new sheet.
 However you installed, the **📄 Notes** setup dialog appears automatically the first time the sheet opens. It asks for two things:
 
 - **Vault folder name** — the name of the top-level Google Drive folder containing your files (e.g. `obsidian`, `My Vault`). The script verifies this folder exists before saving.
-- **File name column** — the column number where your file names live (A = 1, B = 2, C = 3, etc.).
+- **File name columns** — one or more columns where your file names live (A = 1, B = 2, C = 3, etc.). Add a row per column and give each one an optional label (e.g. "Migrated", "Original") so you can tell which version you opened. Click **+ Add column** to track multiple file lists side-by-side.
 
 Click **Save settings**. You're ready. You can reopen this dialog any time via **📄 Notes → Settings**.
 
@@ -89,9 +89,9 @@ Click **Save settings**. You're ready. You can reopen this dialog any time via *
 
 ## Usage
 
-1. Click any cell in your file name column containing a file name.
+1. Click any cell in one of your file name columns containing a file name.
 2. Click **📄 Notes → Preview Selected File** in the menu bar.
-3. The sidebar opens on the right showing the preview.
+3. The sidebar opens on the right showing the preview. If the column has a label, it appears in the sidebar/dialog title so you know which version you opened.
 
 To open as a wider, draggable dialog instead: **📄 Notes → Preview Selected File (Dialog)**, or click the **↗ Pop out** button inside the sidebar.
 
@@ -101,7 +101,7 @@ To resize the dialog: click **⇲ Resize** in the dialog header. Two sliders app
 
 ## Sheet structure
 
-The script works with any sheet layout. During setup you specify which column contains your file names — the default is Column C.
+The script works with any sheet layout. During setup you specify which column(s) contain your file names — the default is Column C. You can configure multiple columns when you want to track parallel file lists (e.g. migrated and original copies).
 
 File names may include or omit the `.md` extension for markdown files; both are handled. All other file types should include their extension (e.g. `report.pdf`, `photo.png`).
 
@@ -135,13 +135,13 @@ const CONFIG = {
 };
 ```
 
-Vault folder name and file name column are set via **📄 Notes → Settings**, not here.
+Vault folder name and file name columns are set via **📄 Notes → Settings**, not here.
 
 ---
 
 ## Updating settings
 
-To change your vault folder or column later: **📄 Notes → Settings**. The same setup dialog reopens with your current values pre-filled.
+To change your vault folder or columns later: **📄 Notes → Settings**. The same setup dialog reopens with your current values pre-filled.
 
 ---
 

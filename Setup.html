@@ -78,6 +78,60 @@
     }
     input.error { border-color: var(--red); }
 
+    .col-row {
+      display: grid;
+      grid-template-columns: 80px 1fr 32px;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .col-row input[type="number"] { padding: 7px 8px; }
+    .col-row input[type="text"]   { padding: 7px 10px; }
+    .col-row .remove-btn {
+      background: transparent;
+      color: var(--overlay);
+      border: 1px solid var(--surface0);
+      border-radius: 5px;
+      width: 32px;
+      height: 32px;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      transition: color 0.12s, border-color 0.12s;
+    }
+    .col-row .remove-btn:hover {
+      color: var(--red);
+      border-color: var(--red);
+    }
+    .col-row .remove-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .col-headings {
+      display: grid;
+      grid-template-columns: 80px 1fr 32px;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--overlay);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .add-btn {
+      margin-top: 6px;
+      background: transparent;
+      color: var(--blue);
+      border: 1px dashed var(--surface1);
+      border-radius: 5px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.12s, color 0.12s;
+    }
+    .add-btn:hover { border-color: var(--blue); color: var(--lavender); }
+
     .hint {
       font-size: 11px;
       color: var(--overlay);
@@ -145,9 +199,9 @@
   <div class="header">
     <h1>📄 Notes — Setup</h1>
     <? if (isFirstRun) { ?>
-      <p>Welcome! Before you start previewing notes, tell the script where your Obsidian vault lives and which column contains your file names.</p>
+      <p>Welcome! Before you start previewing notes, tell the script where your Obsidian vault lives and which column(s) contain your file names.</p>
     <? } else { ?>
-      <p>Update your vault folder name or the column where file names are stored.</p>
+      <p>Update your vault folder name or the columns where file names are stored.</p>
     <? } ?>
   </div>
 
@@ -168,16 +222,15 @@
     </div>
 
     <div class="field">
-      <label for="file-col">File name column number</label>
-      <input
-        type="number"
-        id="file-col"
-        value="<?= fileNameColumn ?>"
-        min="1"
-        max="26"
-        placeholder="3"
-      />
-      <p class="hint">The column containing your note file names (A = 1, B = 2, C = 3 …). Click a cell in that column and check the column letter in the sheet to confirm.</p>
+      <label>File name columns</label>
+      <div class="col-headings">
+        <span>Column</span>
+        <span>Label (optional)</span>
+        <span></span>
+      </div>
+      <div id="col-rows"></div>
+      <button type="button" class="add-btn" id="add-col-btn">+ Add column</button>
+      <p class="hint">Each row points at a column containing file names (A = 1, B = 2, C = 3 …). The optional label appears in the preview title so you can tell which version you opened — e.g. "Migrated" or "Original".</p>
     </div>
   </div>
 
@@ -189,18 +242,77 @@
   </div>
 
   <script>
+    var INITIAL_COLUMNS = <?!= JSON.stringify(fileNameColumns) ?>;
+
+    function addRow(column, label) {
+      var container = document.getElementById('col-rows');
+      var row = document.createElement('div');
+      row.className = 'col-row';
+
+      var colInput = document.createElement('input');
+      colInput.type = 'number';
+      colInput.min = '1';
+      colInput.max = '26';
+      colInput.placeholder = '3';
+      colInput.className = 'col-num';
+      if (column != null) colInput.value = column;
+
+      var labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.placeholder = 'e.g. Migrated';
+      labelInput.maxLength = 40;
+      labelInput.className = 'col-label';
+      labelInput.autocomplete = 'off';
+      labelInput.spellcheck = false;
+      if (label) labelInput.value = label;
+
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'remove-btn';
+      removeBtn.innerHTML = '&times;';
+      removeBtn.title = 'Remove this column';
+      removeBtn.addEventListener('click', function () {
+        row.remove();
+        refreshRemoveButtons();
+      });
+
+      row.appendChild(colInput);
+      row.appendChild(labelInput);
+      row.appendChild(removeBtn);
+      container.appendChild(row);
+      refreshRemoveButtons();
+    }
+
+    function refreshRemoveButtons() {
+      // Disable the last remaining row's remove button — at least one column is required.
+      var btns = document.querySelectorAll('#col-rows .remove-btn');
+      btns.forEach(function (btn) { btn.disabled = btns.length <= 1; });
+    }
+
+    function collectRows() {
+      var rows = document.querySelectorAll('#col-rows .col-row');
+      var out = [];
+      rows.forEach(function (row) {
+        var col = parseInt(row.querySelector('.col-num').value, 10);
+        var label = row.querySelector('.col-label').value.trim();
+        out.push({ column: col, label: label, _el: row });
+      });
+      return out;
+    }
+
     function save() {
       var folderInput = document.getElementById('vault-folder');
-      var colInput    = document.getElementById('file-col');
       var feedback    = document.getElementById('feedback');
       var saveBtn     = document.getElementById('save-btn');
 
       var folder = folderInput.value.trim();
-      var col    = parseInt(colInput.value, 10);
+      var rows = collectRows();
 
       // Client-side validation first — catches obvious errors before a server round-trip.
       folderInput.classList.remove('error');
-      colInput.classList.remove('error');
+      rows.forEach(function (r) {
+        r._el.querySelector('.col-num').classList.remove('error');
+      });
       feedback.className = 'feedback';
       feedback.textContent = '';
 
@@ -209,15 +321,29 @@
         folderInput.classList.add('error');
         errors.push('Vault folder name is required.');
       }
-      if (isNaN(col) || col < 1 || col > 26) {
-        colInput.classList.add('error');
-        errors.push('Column must be a number between 1 and 26.');
+      if (rows.length === 0) {
+        errors.push('Add at least one file name column.');
       }
+      var seen = {};
+      rows.forEach(function (r, i) {
+        if (isNaN(r.column) || r.column < 1 || r.column > 26) {
+          r._el.querySelector('.col-num').classList.add('error');
+          errors.push('Row ' + (i + 1) + ': column must be 1–26.');
+        } else if (seen[r.column]) {
+          r._el.querySelector('.col-num').classList.add('error');
+          errors.push('Column ' + r.column + ' is listed twice.');
+        } else {
+          seen[r.column] = true;
+        }
+      });
       if (errors.length) {
         feedback.className = 'feedback error';
         feedback.textContent = errors.join(' ');
         return;
       }
+
+      // Strip the DOM-reference field before serializing.
+      var payload = rows.map(function (r) { return { column: r.column, label: r.label }; });
 
       // Disable the button and show a spinner while the server validates
       // the folder name against Drive.
@@ -246,12 +372,28 @@
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save settings';
         })
-        .saveSettings(folder, col);
+        .saveSettings(folder, JSON.stringify(payload));
     }
 
-    // Allow Enter key to submit.
+    // Initial render of stored columns.
+    if (INITIAL_COLUMNS && INITIAL_COLUMNS.length) {
+      INITIAL_COLUMNS.forEach(function (c) { addRow(c.column, c.label); });
+    } else {
+      addRow(3, '');
+    }
+
+    document.getElementById('add-col-btn').addEventListener('click', function () {
+      addRow(null, '');
+    });
+
+    // Allow Enter key to submit, but not when focused inside a row's inputs
+    // (Enter inside a number input can be confusing — only submit from elsewhere).
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !document.getElementById('save-btn').disabled) save();
+      if (e.key !== 'Enter') return;
+      if (document.getElementById('save-btn').disabled) return;
+      var t = e.target;
+      if (t && t.tagName === 'INPUT' && t.type === 'number') return;
+      save();
     });
   </script>
 </body>

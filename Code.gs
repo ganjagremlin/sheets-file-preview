@@ -11,7 +11,9 @@
 
 const CONFIG = {
   vaultFolderName: 'obsidian',  // overridden by setup
-  fileNameColumn: 3,            // overridden by setup (Column C = 3)
+  fileNameColumns: [            // overridden by setup
+    { column: 3, label: '' }    // Column C = 3
+  ],
   headerRow: 1,
   cacheTtlSeconds: 300,
   sidebarTitle: 'Note Preview',
@@ -25,7 +27,8 @@ const CONFIG = {
 
 // PropertiesService keys
 const PROP_VAULT_FOLDER   = 'vaultFolderName';
-const PROP_FILE_COL       = 'fileNameColumn';
+const PROP_FILE_COL       = 'fileNameColumn';   // legacy: single int, read for back-compat
+const PROP_FILE_COLS      = 'fileNameColumns';  // current: JSON [{column, label}, ...]
 const PROP_SETUP_DONE     = 'setupComplete';
 const PROP_DIALOG_WIDTH   = 'dialogWidth';
 const PROP_DIALOG_HEIGHT  = 'dialogHeight';
@@ -64,20 +67,20 @@ function onOpen() {
 // ---- preview entry points ----
 
 function previewSelectedFile() {
-  const fileName = getSelectedFileName_();
-  if (!fileName) return;
-  showSidebar(fileName);
+  const sel = getSelectedFileName_();
+  if (!sel) return;
+  showSidebar(sel.fileName, sel.label);
 }
 
 function previewSelectedFileAsDialog() {
-  const fileName = getSelectedFileName_();
-  if (!fileName) return;
-  showDialog(fileName);
+  const sel = getSelectedFileName_();
+  if (!sel) return;
+  showDialog(sel.fileName, sel.label);
 }
 
 /** Called from the sidebar's "Pop out" button via google.script.run. */
-function showDialogForFile(fileName) {
-  showDialog(fileName);
+function showDialogForFile(fileName, label) {
+  showDialog(fileName, label || '');
 }
 
 // ---- setup & settings ----
@@ -89,13 +92,13 @@ function showDialogForFile(fileName) {
 function showSetup() {
   const template = HtmlService.createTemplateFromFile('Setup');
   const settings = getSettings_();
-  template.vaultFolderName = settings.vaultFolderName;
-  template.fileNameColumn  = settings.fileNameColumn;
-  template.isFirstRun      = !PropertiesService.getUserProperties().getProperty(PROP_SETUP_DONE);
+  template.vaultFolderName  = settings.vaultFolderName;
+  template.fileNameColumns  = settings.fileNameColumns;
+  template.isFirstRun       = !PropertiesService.getUserProperties().getProperty(PROP_SETUP_DONE);
 
   const html = template.evaluate()
-    .setWidth(460)
-    .setHeight(340)
+    .setWidth(500)
+    .setHeight(480)
     .setSandboxMode(HtmlService.SandboxMode.IFRAME);
 
   SpreadsheetApp.getUi().showModalDialog(html, '📄 Notes — Setup');
@@ -108,13 +111,38 @@ function showSettings() {
 /**
  * Called by Setup.html on form submit. Saves settings and marks setup done.
  * Returns { ok, error } so the dialog can show validation feedback.
+ *
+ * @param {string} vaultFolderName
+ * @param {string} columnsJson  JSON-encoded array of {column, label}.
  */
-function saveSettings(vaultFolderName, fileNameColumn) {
+function saveSettings(vaultFolderName, columnsJson) {
   const folder = vaultFolderName && vaultFolderName.trim();
-  const col    = parseInt(fileNameColumn, 10);
-
   if (!folder) return { ok: false, error: 'Vault folder name cannot be empty.' };
-  if (isNaN(col) || col < 1 || col > 26) return { ok: false, error: 'Column must be a number between 1 and 26.' };
+
+  let columns;
+  try {
+    columns = JSON.parse(columnsJson);
+  } catch (e) {
+    return { ok: false, error: 'Could not parse column configuration.' };
+  }
+  if (!Array.isArray(columns) || columns.length === 0) {
+    return { ok: false, error: 'Add at least one file name column.' };
+  }
+
+  const seen = {};
+  const cleaned = [];
+  for (let i = 0; i < columns.length; i++) {
+    const col = parseInt(columns[i] && columns[i].column, 10);
+    const label = String((columns[i] && columns[i].label) || '').trim().slice(0, 40);
+    if (isNaN(col) || col < 1 || col > 26) {
+      return { ok: false, error: `Row ${i + 1}: column must be between 1 and 26.` };
+    }
+    if (seen[col]) {
+      return { ok: false, error: `Column ${columnToLetter_(col)} is listed more than once.` };
+    }
+    seen[col] = true;
+    cleaned.push({ column: col, label: label });
+  }
 
   // Verify the folder exists in Drive before saving.
   const folders = DriveApp.getFoldersByName(folder);
@@ -124,7 +152,9 @@ function saveSettings(vaultFolderName, fileNameColumn) {
 
   const props = PropertiesService.getUserProperties();
   props.setProperty(PROP_VAULT_FOLDER, folder);
-  props.setProperty(PROP_FILE_COL,     String(col));
+  props.setProperty(PROP_FILE_COLS,    JSON.stringify(cleaned));
+  // Drop the legacy single-column property so it can't drift out of sync.
+  props.deleteProperty(PROP_FILE_COL);
   props.setProperty(PROP_SETUP_DONE,   'true');
 
   // Bust the cached vault folder ID since the folder may have changed.
@@ -137,15 +167,36 @@ function saveSettings(vaultFolderName, fileNameColumn) {
 /**
  * Returns current saved settings (falling back to CONFIG defaults).
  * This is the single source of truth for runtime settings — all code
- * that needs vaultFolderName or fileNameColumn calls this, not CONFIG.
+ * that needs vaultFolderName or fileNameColumns calls this, not CONFIG.
+ *
+ * fileNameColumns is always an array of {column, label}. The legacy
+ * single-int property is migrated on read.
  */
 function getSettings_() {
   const props = PropertiesService.getUserProperties();
   const savedFolder = props.getProperty(PROP_VAULT_FOLDER);
-  const savedCol    = parseInt(props.getProperty(PROP_FILE_COL), 10);
+
+  let columns = null;
+  const savedColsJson = props.getProperty(PROP_FILE_COLS);
+  if (savedColsJson) {
+    try {
+      const parsed = JSON.parse(savedColsJson);
+      if (Array.isArray(parsed) && parsed.length) columns = parsed;
+    } catch (e) {
+      // Fall through to legacy / default.
+    }
+  }
+  if (!columns) {
+    const legacyCol = parseInt(props.getProperty(PROP_FILE_COL), 10);
+    if (!isNaN(legacyCol)) {
+      columns = [{ column: legacyCol, label: '' }];
+    }
+  }
+  if (!columns) columns = CONFIG.fileNameColumns.slice();
+
   return {
-    vaultFolderName: savedFolder || CONFIG.vaultFolderName,
-    fileNameColumn:  isNaN(savedCol) ? CONFIG.fileNameColumn : savedCol
+    vaultFolderName:  savedFolder || CONFIG.vaultFolderName,
+    fileNameColumns:  columns
   };
 }
 
@@ -195,14 +246,27 @@ function resetDialogSize() {
 
 // ---- internals ----
 
+/**
+ * Reads the active cell, validates it sits in one of the configured file
+ * name columns, and returns { fileName, label } — or null after alerting
+ * the user when the selection is invalid.
+ */
 function getSelectedFileName_() {
   const ui       = SpreadsheetApp.getUi();
   const settings = getSettings_();
   const cell     = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getActiveCell();
+  const colNum   = cell.getColumn();
 
-  if (cell.getColumn() !== settings.fileNameColumn || cell.getRow() === CONFIG.headerRow) {
-    const colLetter = columnToLetter_(settings.fileNameColumn);
-    ui.alert(`Please select a file name cell in Column ${colLetter} first.`);
+  let match = null;
+  for (let i = 0; i < settings.fileNameColumns.length; i++) {
+    if (settings.fileNameColumns[i].column === colNum) {
+      match = settings.fileNameColumns[i];
+      break;
+    }
+  }
+
+  if (!match || cell.getRow() === CONFIG.headerRow) {
+    ui.alert(`Please select a file name cell in ${describeColumns_(settings.fileNameColumns)} first.`);
     return null;
   }
 
@@ -210,7 +274,22 @@ function getSelectedFileName_() {
   if (!raw) { ui.alert('Selected cell is empty.'); return null; }
   // Bare names (no extension) are assumed to be markdown — backward compat.
   // Names with any extension (e.g. report.pdf, photo.jpg) are used as-is.
-  return hasExtension_(raw) ? raw : raw + '.md';
+  const fileName = hasExtension_(raw) ? raw : raw + '.md';
+  return { fileName: fileName, label: match.label || '' };
+}
+
+/**
+ * Builds a human-readable list of configured columns for error messages,
+ * e.g. "Column C (Migrated) or D (Original)".
+ */
+function describeColumns_(columns) {
+  const parts = columns.map(function (c) {
+    const letter = columnToLetter_(c.column);
+    return c.label ? `Column ${letter} (${c.label})` : `Column ${letter}`;
+  });
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return parts[0] + ' or ' + parts[1];
+  return parts.slice(0, -1).join(', ') + ', or ' + parts[parts.length - 1];
 }
 
 /**
@@ -233,17 +312,19 @@ function columnToLetter_(col) {
   return letter;
 }
 
-function showSidebar(fileName) {
-  const html = renderTemplate_('Sidebar', fileName, 'sidebar').setTitle(CONFIG.sidebarTitle);
+function showSidebar(fileName, label) {
+  const title = label ? `${CONFIG.sidebarTitle} — ${label}` : CONFIG.sidebarTitle;
+  const html = renderTemplate_('Sidebar', fileName, 'sidebar').setTitle(title);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
-function showDialog(fileName) {
+function showDialog(fileName, label) {
   const dims = getDialogDimensions_();
   const html = renderTemplate_('Dialog', fileName, 'dialog')
     .setWidth(dims.width)
     .setHeight(dims.height);
-  SpreadsheetApp.getUi().showModelessDialog(html, fileName);
+  const dialogTitle = label ? `${label} — ${fileName}` : fileName;
+  SpreadsheetApp.getUi().showModelessDialog(html, dialogTitle);
 }
 
 function getDialogDimensions_() {

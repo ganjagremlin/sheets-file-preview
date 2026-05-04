@@ -103,8 +103,8 @@ This is the main benefit of clasp — deploying to a second (or tenth) sheet tak
 ### Clone the repo (if you haven't already)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/obsidian-sheets-preview.git
-cd obsidian-sheets-preview
+git clone https://github.com/ganjagremlin/sheets-file-preview.git
+cd sheets-file-preview
 ```
 
 ### Create the bound Apps Script project on the new sheet
@@ -210,8 +210,8 @@ If someone else wants to use this project on their own sheet, the steps are:
 ### Clone and configure
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/obsidian-sheets-preview.git
-cd obsidian-sheets-preview
+git clone https://github.com/ganjagremlin/sheets-file-preview.git
+cd sheets-file-preview
 ```
 
 Open their Google Sheet → **Extensions → Apps Script** → copy the Script ID.

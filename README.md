@@ -15,6 +15,8 @@ If you use Google Sheets to track or index files in Google Drive (such as an Obs
   - **Plain text** (`.txt`) — displayed in a monospace block with proper word wrapping
   - **Everything else** — PDFs, images (PNG, JPG, GIF, etc.), DOCX, XLSX, PPTX, and any other Drive-supported format shown via Google Drive's built-in viewer
 - **Sidebar** that stays open as you click between rows
+- **Auto-update mode** — toggle the **Auto** checkbox in the sidebar header and the preview switches automatically whenever you select a different file-name cell, no menu click required
+- **Open in Drive** — one-click jump from the preview to the source file in Google Drive (opens in a new tab)
 - **Resizable dialog** (pop-out) when you need more reading room
 - **Guided setup** — a settings dialog on first run; no manual config file editing
 - **Fast** — recursive Drive search scoped to your vault folder, with multi-layer caching (folder ID, file ID, file content)
@@ -95,6 +97,10 @@ Click **Save settings**. You're ready. You can reopen this dialog any time via *
 
 To open as a wider, draggable dialog instead: **📄 Notes → Preview Selected File (Dialog)**, or click the **↗ Pop out** button inside the sidebar.
 
+To follow your cell selection automatically, tick the **Auto** checkbox in the sidebar header. The preview will refresh whenever you click a different file-name cell. Your preference is remembered, so the sidebar reopens with the same setting next time. Toggle it off to pin the current preview while you scroll around.
+
+To jump to the source file in Drive, click **↗ Open in Drive** in the sidebar/dialog header — it opens the file in a new tab.
+
 To resize the dialog: click **⇲ Resize** in the dialog header. Two sliders appear (width and height) — drag to resize live. Your preferred size is remembered across sessions. Click **Reset to default** to go back to the configured default.
 
 ---
@@ -161,7 +167,7 @@ Three layers, all per-user:
 
 - **Sidebar width is fixed at 300px** — this is a hard limit of the Google Apps Script platform, not something the script can change. Use the pop-out dialog when you need more room, especially for PDFs and documents.
 - **The dialog closes when you click the sheet** — standard Apps Script modeless dialog behavior. The sidebar stays open.
-- **Preview requires a menu click** — Apps Script doesn't allow running code on cell click, so there's no way to trigger the preview automatically when you select a row.
+- **First preview requires a menu click** — Apps Script's `onSelectionChange` trigger runs in a restricted auth mode that can't open sidebars or dialogs. Once the sidebar is open you can enable the **Auto** checkbox and subsequent previews follow your selection automatically; the very first preview still needs the menu.
 - **Obsidian-specific syntax is not rendered** — `[[wikilinks]]`, `![[embeds]]`, `> [!callout]` blocks, and `#tags` display as plain text. Standard markdown is fully rendered.
 - **Drive viewer requires network access** — PDFs, images, and other non-text file types are rendered by Google Drive's built-in viewer, which requires an internet connection and that the file be accessible to the authenticated user.
 - **First preview may be slow** — the script walks your vault folder tree to find the file. Subsequent previews of the same file are fast (cached file ID).

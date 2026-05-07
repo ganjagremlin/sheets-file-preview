@@ -32,6 +32,7 @@ const PROP_FILE_COLS      = 'fileNameColumns';  // current: JSON [{column, label
 const PROP_SETUP_DONE     = 'setupComplete';
 const PROP_DIALOG_WIDTH   = 'dialogWidth';
 const PROP_DIALOG_HEIGHT  = 'dialogHeight';
+const PROP_AUTO_UPDATE    = 'autoUpdate';
 
 // ---- menu ----
 
@@ -254,8 +255,37 @@ function resetDialogSize() {
 function getSelectedFileName_() {
   const ui       = SpreadsheetApp.getUi();
   const settings = getSettings_();
-  const cell     = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getActiveCell();
-  const colNum   = cell.getColumn();
+  const result   = readActiveSelection_(settings);
+
+  if (result.error) { ui.alert(result.error); return null; }
+  return { fileName: result.fileName, label: result.label };
+}
+
+/**
+ * Polled by the sidebar when auto-update is on. Returns the file name and
+ * label for the currently active cell, or null when the selection isn't a
+ * valid file-name cell. Never throws and never alerts — silent so polling
+ * can run frequently without disrupting the user.
+ */
+function getActiveSelection() {
+  try {
+    const settings = getSettings_();
+    const result   = readActiveSelection_(settings);
+    if (result.error) return null;
+    return { fileName: result.fileName, label: result.label };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Shared core: reads the active cell, validates the column / row / value,
+ * and returns either { fileName, label } or { error: string }. No UI side
+ * effects so both the menu entry point and the silent poller can use it.
+ */
+function readActiveSelection_(settings) {
+  const cell   = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getActiveCell();
+  const colNum = cell.getColumn();
 
   let match = null;
   for (let i = 0; i < settings.fileNameColumns.length; i++) {
@@ -266,16 +296,27 @@ function getSelectedFileName_() {
   }
 
   if (!match || cell.getRow() === CONFIG.headerRow) {
-    ui.alert(`Please select a file name cell in ${describeColumns_(settings.fileNameColumns)} first.`);
-    return null;
+    return { error: `Please select a file name cell in ${describeColumns_(settings.fileNameColumns)} first.` };
   }
 
   const raw = String(cell.getValue() || '').trim();
-  if (!raw) { ui.alert('Selected cell is empty.'); return null; }
-  // Bare names (no extension) are assumed to be markdown — backward compat.
-  // Names with any extension (e.g. report.pdf, photo.jpg) are used as-is.
+  if (!raw) return { error: 'Selected cell is empty.' };
+
   const fileName = hasExtension_(raw) ? raw : raw + '.md';
   return { fileName: fileName, label: match.label || '' };
+}
+
+// ---- auto-update preference ----
+
+function getAutoUpdate() {
+  return PropertiesService.getUserProperties().getProperty(PROP_AUTO_UPDATE) === 'true';
+}
+
+function setAutoUpdate(enabled) {
+  const props = PropertiesService.getUserProperties();
+  if (enabled) props.setProperty(PROP_AUTO_UPDATE, 'true');
+  else props.deleteProperty(PROP_AUTO_UPDATE);
+  return enabled === true;
 }
 
 /**

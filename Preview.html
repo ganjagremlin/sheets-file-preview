@@ -106,6 +106,26 @@
   .btn.primary { color: var(--blue); border-color: var(--blue); }
   .btn.accent  { color: var(--mauve); border-color: var(--mauve); }
 
+  /* Anchor styled as a button needs explicit color reset */
+  a.btn { color: var(--text); display: inline-block; line-height: 1.2; }
+  a.btn:hover { color: var(--text); }
+
+  .auto-update {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--subtext);
+    cursor: pointer;
+    user-select: none;
+    margin-left: auto;
+  }
+  .auto-update input[type="checkbox"] {
+    accent-color: var(--mauve);
+    cursor: pointer;
+    margin: 0;
+  }
+
   /* ---- Scroll area (text / markdown) ---- */
   #scroll-area {
     flex: 1;
@@ -325,11 +345,18 @@
   <div class="header-actions">
     <button class="btn primary" onclick="reloadFile()" title="Reload from Drive (bypasses cache)">↻ Reload</button>
     <button class="btn" onclick="toggleRaw()" id="toggle-btn">View Raw</button>
+    <a class="btn" id="open-in-drive" href="#" target="_blank" rel="noopener" title="Open this file in Google Drive" style="display:none; text-decoration:none;">↗ Open in Drive</a>
     <? if (mode === 'sidebar') { ?>
       <button class="btn accent" onclick="popOut()" title="Open in a wider, draggable dialog">↗ Pop out</button>
     <? } ?>
     <? if (mode === 'dialog') { ?>
       <button class="btn" onclick="toggleResize()" id="resize-btn" title="Show or hide resize controls">⇲ Resize</button>
+    <? } ?>
+    <? if (mode === 'sidebar') { ?>
+      <label class="auto-update" title="Auto-update preview when you select a different file-name cell">
+        <input type="checkbox" id="auto-update-toggle" />
+        <span>Auto</span>
+      </label>
     <? } ?>
   </div>
 </div>
@@ -370,6 +397,9 @@
   var INITIAL_ERROR   = <?!= JSON.stringify(error) ?>;
   var MODE            = <?!= JSON.stringify(mode) ?>;
 
+  // Mutable globals so polling can swap to a different file in place.
+  var RENDER_MODE = null;
+
   // Apply mode-specific body class for styling.
   if (MODE === 'dialog') document.body.classList.add('dialog');
 
@@ -389,18 +419,13 @@
     return 'iframe';
   }
 
-  var RENDER_MODE = getRenderMode(FILE_NAME, MIME_TYPE);
-
-  // ---- markdown-it setup (markdown mode only) ----
-  var md;
-  if (RENDER_MODE === 'markdown') {
-    md = window.markdownit({
-      html: true,
-      linkify: true,
-      breaks: false,
-      typographer: true
-    });
-  }
+  // ---- markdown-it setup (lazy; reused across files) ----
+  var md = window.markdownit({
+    html: true,
+    linkify: true,
+    breaks: false,
+    typographer: true
+  });
 
   // ---- File-type icon ----
   function getFileIcon(fileName, mimeType) {
@@ -414,15 +439,6 @@
     if (lower.endsWith('.txt')) return '📃';
     if (lower.endsWith('.md') || lower.endsWith('.markdown')) return '📄';
     return '📄';
-  }
-
-  document.getElementById('file-icon').textContent = getFileIcon(FILE_NAME, MIME_TYPE);
-
-  // ---- Button visibility ----
-  // "View Raw" only makes sense for markdown (where there are two distinct views).
-  if (RENDER_MODE !== 'markdown') {
-    var toggleBtn = document.getElementById('toggle-btn');
-    if (toggleBtn) toggleBtn.style.display = 'none';
   }
 
   // ---- Content rendering ----
@@ -478,6 +494,58 @@
     scrollArea.style.display = 'none';
     iframeWrap.style.display = 'block';
     iframe.src = 'https://drive.google.com/file/d/' + fileId + '/preview';
+  }
+
+  function showScrollArea() {
+    document.getElementById('scroll-area').style.display = '';
+    document.getElementById('iframe-wrapper').style.display = 'none';
+  }
+
+  /**
+   * Renders the full UI for a file. Used both for the initial load and when
+   * auto-update polling switches to a different file. Updates header, icon,
+   * Open-in-Drive link, raw-toggle visibility, and content area.
+   */
+  function renderFile(fileName, fileId, mimeType, content, error) {
+    FILE_NAME   = fileName;
+    FILE_ID     = fileId;
+    MIME_TYPE   = mimeType;
+    RENDER_MODE = getRenderMode(fileName, mimeType);
+
+    document.getElementById('file-name').textContent = fileName;
+    document.getElementById('file-icon').textContent = getFileIcon(fileName, mimeType);
+
+    // Open in Drive link: only meaningful when we have a fileId.
+    var openLink = document.getElementById('open-in-drive');
+    if (openLink) {
+      if (fileId) {
+        openLink.href = 'https://drive.google.com/file/d/' + fileId + '/view';
+        openLink.style.display = '';
+      } else {
+        openLink.style.display = 'none';
+      }
+    }
+
+    // "View Raw" only makes sense for markdown (two distinct views).
+    var toggleBtn = document.getElementById('toggle-btn');
+    if (toggleBtn) toggleBtn.style.display = (RENDER_MODE === 'markdown') ? '' : 'none';
+    // When swapping files, drop back to rendered view.
+    if (showingRaw) toggleRaw();
+
+    if (RENDER_MODE === 'iframe') {
+      if (error) {
+        showScrollArea();
+        renderContent(null, error);
+      } else if (fileId) {
+        showIframe(fileId);
+      } else {
+        showScrollArea();
+        renderContent(null, 'Could not retrieve file ID for Drive preview.');
+      }
+    } else {
+      showScrollArea();
+      renderContent(content, error);
+    }
   }
 
   // ---- Reload ----
@@ -611,16 +679,72 @@
 
   // ---- Initial render ----
 
-  if (RENDER_MODE === 'iframe') {
-    if (INITIAL_ERROR) {
-      // File found but something went wrong — show error in the scroll area.
-      renderContent(null, INITIAL_ERROR);
-    } else if (FILE_ID) {
-      showIframe(FILE_ID);
-    } else {
-      renderContent(null, 'Could not retrieve file ID for Drive preview.');
+  renderFile(FILE_NAME, FILE_ID, MIME_TYPE, INITIAL_CONTENT, INITIAL_ERROR);
+
+  // ---- Auto-update polling (sidebar mode only) ----
+  //
+  // Apps Script's onSelectionChange runs in AuthMode.LIMITED and cannot drive
+  // sidebar UI, so we poll instead. The toggle is persisted per-user.
+
+  var POLL_INTERVAL_MS = 500;
+  var pollTimer = null;
+  var fetchSeq  = 0;       // monotonically increases; stale fetches are dropped
+  var lastPolledFile = FILE_NAME;
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(pollSelection, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function pollSelection() {
+    if (document.hidden) return;
+    google.script.run
+      .withSuccessHandler(function (result) {
+        // Selection isn't a valid file-name cell — leave the last preview in place.
+        if (!result || !result.fileName) return;
+        if (result.fileName === lastPolledFile) return;
+        lastPolledFile = result.fileName;
+        loadFile(result.fileName);
+      })
+      .withFailureHandler(function () { /* silent — transient errors shouldn't spam */ })
+      .getActiveSelection();
+  }
+
+  function loadFile(fileName) {
+    var seq = ++fetchSeq;
+    google.script.run
+      .withSuccessHandler(function (result) {
+        if (seq !== fetchSeq) return;  // a newer fetch superseded us
+        renderFile(fileName, result.fileId, result.mimeType, result.content, result.error);
+      })
+      .withFailureHandler(function (err) {
+        if (seq !== fetchSeq) return;
+        renderFile(fileName, null, null, null, (err && err.message) || 'Failed to load file.');
+      })
+      .fetchFileContent(fileName);
+  }
+
+  if (MODE === 'sidebar') {
+    var autoToggle = document.getElementById('auto-update-toggle');
+    if (autoToggle) {
+      autoToggle.addEventListener('change', function () {
+        google.script.run.setAutoUpdate(autoToggle.checked);
+        if (autoToggle.checked) startPolling();
+        else stopPolling();
+      });
+      google.script.run
+        .withSuccessHandler(function (enabled) {
+          autoToggle.checked = !!enabled;
+          if (enabled) startPolling();
+        })
+        .withFailureHandler(function () { /* leave unchecked */ })
+        .getAutoUpdate();
     }
-  } else {
-    renderContent(INITIAL_CONTENT, INITIAL_ERROR);
   }
 </script>
